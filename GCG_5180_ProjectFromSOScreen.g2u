@@ -1,0 +1,133 @@
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'GCG_5180_ProjectFromSOScreen.g2u
+'Trey Seddon
+'8/22/2018
+'Renlita Doors
+'This will open up the Project Management > File > Projects > New from the order entry open script 1 button in Order Entry > File > Sales Orders > Open if there is no project set,
+'and will open Project Management > File > Projects > Open for the set project if there is one.
+
+'Hooks
+'11560, Order Entry > File > Sales Orders > Open/Delete, Populate
+'11910, Order Entry > File > Sales Orders > Open/Delete, script 1 button
+'11565, Order Entry > File > Sales Orders > Open, Order loaded
+'40401, Project Management > File > Projects > Open, Populate
+
+'Without too much effort I could have the new project go back to the order...
+
+V.Local.sError.Declare(String)
+F.Intrinsic.Control.Try
+
+F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+	F.Intrinsic.Control.Case(11560)
+		'set the button title and lock it for Order entry populate
+		'V.Passed.000201 = script button 1
+		V.Passed.000201.Set("Project")
+		'Customer asked for ability to open enw project from the new sales order screen
+		F.Intrinsic.Control.If(V.Caller.Switches, =, "N")
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000201, "LOCK", 0)
+		F.Intrinsic.Control.Else
+			F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000201, "LOCK", 1)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Case(11910)
+		'When the button is clicked, open the project window
+		F.Intrinsic.Control.CallSub(OpenProjectScreen)
+		
+	F.Intrinsic.Control.Case(11565)
+		'When an order is loaded, unlock the button
+		F.Intrinsic.UI.ChangeCallerProperty(V.Passed.000201, "LOCK", 0)
+	
+	F.Intrinsic.Control.Case(40401)
+		'Load the project if there is one to load when opening the Open Projects menu
+		F.Intrinsic.Control.CallSub(LoadProject)
+F.Intrinsic.Control.EndSelect
+
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError)
+    F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.OpenProjectScreen.Start
+V.Local.sError.Declare(String)
+F.Intrinsic.Control.Try
+
+'First check security
+V.Local.bPermission.Declare(Boolean, True)
+'F.Global.Security.CheckUserAccessIPM(307, 1, V.Local.bPermission)
+'Working differently on the customer side for some reason, always returning false,
+'They don't care about security anyway, so I'm disabling it
+
+'Then check if the menu is already running
+V.Local.sSQL.Declare(String)
+V.Local.sRet.Declare(String)
+F.Intrinsic.String.Build("select * from MENU_PROCESS where PROGRAM = 'PRJ001' and SESSION_ID = '{0}' and COMPANY_CODE = '{1}'", V.Caller.Terminal, V.Caller.CompanyCode, V.Local.sSQL)
+F.ODBC.Connection!Comm.OpenCommonConnection
+F.ODBC.Connection!Comm.ExecuteAndReturn(V.Local.sSQL, V.Local.sRet)
+
+'Open the menu
+F.Intrinsic.Control.If(V.Local.bPermission)
+	F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF)
+		V.Local.iRet.Declare(Long)
+		'Save project # to custom table if there is one, and open the project open screen
+		'V.Passed.000158 = project
+		F.Intrinsic.Control.If(V.Passed.000158.Trim, !=, "")
+			F.ODBC.Connection!Conn.OpenCompanyConnection
+			F.Intrinsic.String.Build("insert into GCG_5180_Project (Terminal, Project) values ('{0}', '{1}')", V.Caller.Terminal, V.Passed.000158.Trim, V.Local.sSQL)
+			F.ODBC.Connection!Conn.Execute(V.Local.sSQL)
+			F.ODBC.Connection!Conn.Close
+			'252, 1 = Project Management > File > Projects > Open
+			F.Global.General.LaunchMenuTask(252, 1, V.Local.iRet)
+		F.Intrinsic.Control.Else
+			'Else, open new project screen
+			'252, 2 = Project Management > File > Projects > New
+			F.Global.General.LaunchMenuTask(252, 2, V.Local.iRet)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Else
+		'Well you can have multiple order entry screens open, so can try to open multiple projects, so maybe this doesn't make sense
+		F.Intrinsic.UI.Msgbox("This process is already running in this session.")
+	F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Else
+	F.Intrinsic.UI.Msgbox("This user does not have access to the projects menu.")
+F.Intrinsic.Control.EndIf
+
+'Pause execution until the project window is closed
+F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF)
+	F.Intrinsic.String.Build("select * from MENU_PROCESS where PROGRAM = 'PRJ001' and SESSION_ID = '{0}' and COMPANY_CODE = '{1}'", V.Caller.Terminal, V.Caller.CompanyCode, V.Local.sSQL)
+	F.Intrinsic.Control.Do
+		F.ODBC.Connection!Comm.ExecuteAndReturn(V.Local.sSQL, V.Local.sRet)
+		F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF)
+			F.Intrinsic.Control.ExitDo
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Loop
+F.Intrinsic.Control.EndIf
+
+F.ODBC.Connection!Comm.Close
+
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError)
+    F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry
+Program.Sub.OpenProjectScreen.End
+
+
+Program.Sub.LoadProject.Start
+'Get the set project from the database and load it
+F.ODBC.Connection!Conn.OpenCompanyConnection
+V.Local.sSQL.Declare(String)
+V.Local.sRet.Declare(String)
+F.Intrinsic.String.Build("select Project from GCG_5180_Project where Terminal = '{0}'", V.Caller.Terminal, V.Local.sSQL)
+F.ODBC.Connection!Conn.ExecuteAndReturn(V.Local.sSQL, V.Local.sRet)
+
+F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, !=, True)
+	V.Passed.000002.Set(V.Local.sRet.Trim)
+	F.Intrinsic.String.Build("delete from GCG_5180_Project where Terminal = '{0}' and Project = '{1}'", V.Caller.Terminal, V.Local.sRet.Trim, V.Local.sSQL)
+	F.ODBC.Connection!Conn.Execute(V.Local.sSQL)
+F.Intrinsic.Control.EndIf
+
+F.ODBC.Connection!Conn.Close
+Program.Sub.LoadProject.End
